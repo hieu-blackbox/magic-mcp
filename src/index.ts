@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { config } from "./utils/config.js";
 import { setupJsonConsole } from "./utils/console.js";
@@ -10,6 +9,9 @@ import { CreateUiTool } from "./tools/create-ui.js";
 import { LogoSearchTool } from "./tools/logo-search.js";
 import { FetchUiTool } from "./tools/fetch-ui.js";
 import { RefineUiTool } from "./tools/refine-ui.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from "express";
+const app = express();
 
 setupJsonConsole();
 
@@ -25,58 +27,22 @@ new LogoSearchTool().register(server);
 new FetchUiTool().register(server);
 new RefineUiTool().register(server);
 
-async function runServer() {
-  const transport = new StdioServerTransport();
-  console.log(`Starting server v${VERSION} (PID: ${process.pid})`);
+let transport: SSEServerTransport;
 
-  let isShuttingDown = false;
+app.get("/sse", (req, res) => {
+    console.log("Received connection");
+    transport = new SSEServerTransport("/messages", res);
+    server.connect(transport);
+});
 
-  const cleanup = () => {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
-
-    console.log(`Shutting down server (PID: ${process.pid})...`);
-    try {
-      transport.close();
-    } catch (error) {
-      console.error(`Error closing transport (PID: ${process.pid}):`, error);
+app.post("/messages", (req, res) => {
+    console.log("Received message handle message");
+    if (transport) {
+        transport.handlePostMessage(req, res);
     }
-    console.log(`Server closed (PID: ${process.pid})`);
-    process.exit(0);
-  };
+});
 
-  transport.onerror = (error: Error) => {
-    console.error(`Transport error (PID: ${process.pid}):`, error);
-    cleanup();
-  };
-
-  transport.onclose = () => {
-    console.log(`Transport closed unexpectedly (PID: ${process.pid})`);
-    cleanup();
-  };
-
-  process.on("SIGTERM", () => {
-    console.log(`Received SIGTERM (PID: ${process.pid})`);
-    cleanup();
-  });
-
-  process.on("SIGINT", () => {
-    console.log(`Received SIGINT (PID: ${process.pid})`);
-    cleanup();
-  });
-
-  process.on("beforeExit", () => {
-    console.log(`Received beforeExit (PID: ${process.pid})`);
-    cleanup();
-  });
-
-  await server.connect(transport);
-  console.log(`Server started (PID: ${process.pid})`);
-}
-
-runServer().catch((error) => {
-  console.error(`Fatal error running server (PID: ${process.pid}):`, error);
-  if (!process.exitCode) {
-    process.exit(1);
-  }
+const PORT = process.env.PORT || 3001;
+    app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
